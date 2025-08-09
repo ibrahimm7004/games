@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Premium Pixel Cat Button</title>
+<style>
+  body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #f7e6f2, #eaf6ff);
+    font-family: sans-serif;
+  }
+
+  .pixel-button {
+    position: relative;
+    width: 120px;
+    height: 120px;
+    background-color: #ffb3c6;
+    border: 4px solid #d18b9c;
+    box-shadow: inset -4px -4px #e090a3, inset 4px 4px #ffffff, 6px 6px 0 rgba(0,0,0,0.2);
+    image-rendering: pixelated;
+    cursor: pointer;
+    outline: none;
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+  }
+
+  .pixel-button:active {
+    transform: translate(2px, 2px);
+    box-shadow: inset -4px -4px #e090a3, inset 4px 4px #ffffff, 3px 3px 0 rgba(0,0,0,0.2);
+  }
+
+  .cat-face {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translate(-50%, 0);
+    width: 50px;
+    height: 50px;
+    opacity: 0;
+    transition: transform 0.25s cubic-bezier(.22,.95,.35,1.2), opacity 0.15s ease;
+    z-index: 2; /* ensure above button surface */
+  }
+
+  .pixel-button.active .cat-face {
+    transform: translate(-50%, -70%); /* pop upward */
+    opacity: 1;
+  }
+
+  /* Build cat face using CSS */
+  .ear {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: #ffcccb;
+    top: 0;
+  }
+
+  .ear.left {
+    left: 4px;
+    box-shadow: 2px 2px #d18b9c;
+  }
+  .ear.right {
+    right: 4px;
+    box-shadow: 2px 2px #d18b9c;
+  }
+
+  .head {
+    position: absolute;
+    top: 8px;
+    left: 0;
+    width: 50px;
+    height: 36px;
+    background: #ffcccb;
+  }
+
+  .eye {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    background: black;
+    top: 18px;
+  }
+
+  .eye.left { left: 12px; }
+  .eye.right { right: 12px; }
+
+  .nose {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    background: #d18b9c;
+    top: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .whisker {
+    position: absolute;
+    width: 10px;
+    height: 2px;
+    background: black;
+    top: 22px;
+  }
+
+  .whisker.left { left: 2px; }
+  .whisker.right { right: 2px; }
+
+</style>
+</head>
+<body>
+  <button class="pixel-button" id="catBtn">
+    <div class="cat-face">
+      <div class="ear left"></div>
+      <div class="ear right"></div>
+      <div class="head"></div>
+      <div class="eye left"></div>
+      <div class="eye right"></div>
+      <div class="nose"></div>
+      <div class="whisker left"></div>
+      <div class="whisker right"></div>
+    </div>
+  </button>
+
+<script>
+  (function(){
+    const btn = document.getElementById('catBtn');
+
+    const activate = () => {
+      btn.classList.add('active');
+      // auto-reset after animation so it can pop again
+      clearTimeout(btn._t);
+      btn._t = setTimeout(() => btn.classList.remove('active'), 600);
+    };
+
+    const press = () => btn.classList.add('pressed');
+    const release = () => btn.classList.remove('pressed');
+
+    // Mouse
+    btn.addEventListener('mousedown', press);
+    window.addEventListener('mouseup', release);
+    btn.addEventListener('click', activate);
+
+    // Touch
+    btn.addEventListener('touchstart', () => { press(); }, {passive:true});
+    btn.addEventListener('touchend', () => { release(); activate(); }, {passive:true});
+
+    // Keyboard
+    btn.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' || e.code === 'Enter') press();
+    });
+    btn.addEventListener('keyup', (e) => {
+      if (e.code === 'Space' || e.code === 'Enter') { release(); activate(); }
+    });
+  })();
+</script>
+</body>
+</html>
