@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"/>
+<title>Whisper Ping — A tiny echolocation adventure</title>
+<style>
+  :root {
+    --bg: #070b10;
+    --ink: #0b1420;
+    --soft: #0e1b28;
+    --cyan: #42e7e0;
+    --teal: #19b6a9;
+    --blue: #68a6ff;
+    --violet: #a08cff;
+    --amber: #ffd166;
+    --gold: #ffdf7f;
+    --red: #ff4d6d;
+    --pink: #ff89b3;
+    --white: #eaf9ff;
+    --grid: rgba(255,255,255,0.03);
+  }
+  html, body {
+    margin: 0;
+    background: radial-gradient(1200px 900px at 100% 0%, #0e1621 0%, var(--bg) 60%);
+    color: var(--white);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+    height: 100%;
+    overflow: hidden;
+    letter-spacing: 0.2px;
+  }
+  #game { display: block; width: 100vw; height: 100vh; }
+  #overlay {
+    pointer-events: none;
+    position: fixed;
+    left: 0; top: 0; right: 0; bottom: 0;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+  }
+  .hud {
+    padding: 10px 14px;
+    font-size: 14px;
+    color: #d1f7ffcc;
+    text-shadow: 0 1px 0 #000a;
+    pointer-events: none;
+    mix-blend-mode: screen;
+  }
+  .hud .pill {
+    display: inline-block;
+    border-radius: 10px;
+    padding: 6px 10px;
+    margin-right: 8px;
+    background: linear-gradient(180deg, #102334, #0b1824);
+    border: 1px solid #153049;
+    box-shadow: inset 0 0 0 1px #08121b, 0 0 10px #0008;
+  }
+  .title, .footer {
+    text-align: center;
+    padding: 14px;
+    text-shadow: 0 2px 10px #000;
+  }
+  .title h1 {
+    margin: 10px 0 4px 0;
+    font-weight: 800;
+    letter-spacing: 1px;
+    font-size: clamp(22px, 3.2vw, 38px);
+    color: var(--gold);
+    text-transform: uppercase;
+  }
+  .title .sub {
+    color: #d7faffcc;
+    font-size: clamp(12px, 2vw, 16px);
+    opacity: 0.85;
+  }
+  .help {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 10px 16px;
+    color: #def2ffdd;
+    font-size: clamp(12px, 1.8vw, 16px);
+  }
+  .help .keys {
+    display: inline-block;
+    margin: 4px 6px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    background: #0b1623;
+    border: 1px solid #16324a;
+    color: #daf7ff;
+  }
+  .footer { font-size: 12px; opacity: 0.75; color: #bfefff; }
+  .hide { display: none; }
+  .glow {
+    text-shadow:
+      0 0 2px #fff8,
+      0 0 8px var(--gold),
+      0 0 16px var(--gold),
+      0 0 24px var(--amber);
+  }
+  @media (max-width: 520px) {
+    .hud { font-size: 12px; }
+    .hud .pill { padding: 4px 8px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="overlay" aria-hidden="true">
+  <div class="hud">
+    <span class="pill" id="hudShards">Shards 0/0</span>
+    <span class="pill" id="hudPings">Pings 0</span>
+    <span class="pill" id="hudTime">00:00.0</span>
+    <span class="pill" id="hudLives">❤❤❤</span>
+    <span class="pill" id="hudSeed">Seed —</span>
+    <span class="pill" id="hudTips">WASD/Arrows to move • Space to ping • M to mute</span>
+  </div>
+  <div class="title" id="title">
+    <h1 class="glow">Whisper Ping</h1>
+    <div class="sub">Find the hidden shards in darkness using sound. But beware — Seekers hear your pings.</div>
+    <div class="help">
+      - Move with <span class="keys">WASD</span> or <span class="keys">Arrow Keys</span><br/>
+      - Reveal the world with <span class="keys">Space</span> to emit a sonar ring<br/>
+      - Collect all <span class="keys">Echo Shards</span> to open the <span class="keys">Gate</span><br/>
+      - Avoid <span class="keys" style="color:#ff8aa8">Seekers</span> — they are attracted when the ring touches them<br/>
+      - Fewer pings and faster time = better score. <span class="keys">R</span> to reroll map, <span class="keys">M</span> to mute
+      <div style="margin-top:10px; opacity:.9">
+        Press <span class="keys">Enter</span> or <span class="keys">Click</span> to start
+      </div>
+    </div>
+  </div>
+  <div class="footer">
+    A completely original 2D browser game in one HTML file
+  </div>
+</div>
+
+<script>
+(() => {
+  // Utility — seeded RNG (Mulberry32)
+  function mulberry32(a) {
+    return function() {
+      let t = a += 0x6D2B79F5;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx*dx + dy*dy; }
+  function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
+  function rndRange(rng, a, b) { return a + (b - a) * rng(); }
+  function choice(rng, arr) { return arr[(arr.length * rng())|0]; }
+  function formatTime(ms) {
+    const s = ms / 1000; const m = Math.floor(s/60); const rem = s % 60;
+    return `${m.toString().padStart(2,'0')}:${rem.toFixed(1).padStart(4,'0')}`;
+  }
+
+  // Canvas setup
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+  let W = 800, H = 600;
+
+  function resize() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = canvas.width = Math.floor(window.innerWidth * dpr);
+    H = canvas.height = Math.floor(window.innerHeight * dpr);
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    // Because we use world == screen, scaling respects DPR
+    ctx.setTransform(1,0,0,1,0,0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // Audio
+  let audioCtx = null;
+  let audioMuted = false;
+  const master = { gain: null };
+  function ensureAudio() {
+    if (audioCtx) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    master.gain = audioCtx.createGain();
+    master.gain.gain.value = 0.35;
+    master.gain.connect(audioCtx.destination);
+  }
+  function setMuted(m) {
+    audioMuted = m;
+    if (!audioCtx) return;
+    master.gain.gain.cancelScheduledValues(audioCtx.currentTime);
+    master.gain.gain.setValueAtTime(m ? 0 : 0.35, audioCtx.currentTime);
+  }
+  function beep(freq=440, dur=0.12, type='sine', vol=0.5, pan=0) {
+    if (!audioCtx || audioMuted) return;
+    const t0 = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    const p = audioCtx.createStereoPanner ? audioCtx.createStereoPanner() : null;
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t0);
+    g.gain.value = 0;
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(g);
+    if (p) { p.pan.value = pan; g.connect(p); p.connect(master.gain); } else { g.connect(master.gain); }
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+  }
+  function chord(freqs=[440,550], dur=0.2, vol=0.4) {
+    freqs.forEach((f,i) => beep(f, dur*(1 - i*0.1), i%2?'triangle':'sine', vol*(1-i*0.15), (i-1)*0.2));
+  }
+
+  // Input
+  const keys = {
+    ArrowUp:false, ArrowDown:false, ArrowLeft:false, ArrowRight:false,
+    KeyW:false, KeyA:false, KeyS:false, KeyD:false,
+    Space:false, ShiftLeft:false
+  };
+  const justPressed = new Set();
+  function onKey(e, down) {
+    if (keys.hasOwnProperty(e.code)) {
+      if (down && !keys[e.code]) justPressed.add(e.code);
+      keys[e.code] = down;
+      if (e.code === 'Space' || e.code === 'ArrowUp' || e.code==='ArrowDown' || e.code==='ArrowLeft' || e.code==='ArrowRight' || e.code.startsWith('Key')) {
+        e.preventDefault();
+      }
+    }
+    if (down && e.code === 'KeyM') setMuted(!audioMuted);
+    if (down && e.code === 'KeyF') toggleFullscreen();
+    if (down && e.code === 'KeyR') reroll();
+    if (down && (e.code === 'Enter' || e.code === 'NumpadEnter')) startFromTitle();
+  }
+  window.addEventListener('keydown', e => { onKey(e, true); });
+  window.addEventListener('keyup',   e => { onKey(e, false); });
+
+  // Click to start audio / game
+  document.body.addEventListener('pointerdown', () => {
+    ensureAudio();
+    startFromTitle();
+  });
+
+  function toggleFullscreen() {
+    const doc = document;
+    const el = document.documentElement;
+    if (!doc.fullscreenElement) el.requestFullscreen?.();
+    else doc.exitFullscreen?.();
+  }
+
+  // Game State
+  const overlayTitle = document.getElementById('title');
+  const hudShards = document.getElementById('hudShards');
+  const hudPings = document.getElementById('hudPings');
+  const hudTime = document.getElementById('hudTime');
+  const hudLives = document.getElementById('hudLives');
+  const hudSeed = document.getElementById('hudSeed');
+
+  let state = 'title'; // title, playing, win, gameover
+  let seed = Math.floor(Math.random()*1e9)>>>0;
+  let rng = mulberry32(seed);
+  let walls = [];
+  let shards = [];
+  let sentinels = [];
+  let pings = [];
+  let exitGate = { x: 0, y: 0, r: 22, active: false, revealed: false };
+  let player = { x: 100, y: 100, r: 12, speed: 220, vx:0, vy:0, blink: 0 };
+  let pingsUsed = 0;
+  let startTime = 0;
+  let elapsed = 0;
+  let collected = 0;
+  let totalShards = 0;
+  let lives = 3;
+  let pingCooldown = 0;
+
+  function reroll() {
+    if (state === 'title') return;
+    seed = Math.floor(Math.random()*1e9)>>>0;
+    resetGame();
+  }
+  function startFromTitle() {
+    if (state !== 'title') return;
+    overlayTitle.classList.add('hide');
+    resetGame();
+  }
+
+  function resetGame() {
+    rng = mulberry32(seed);
+    walls.length = 0; shards.length = 0; sentinels.length = 0; pings.length = 0;
+    pingsUsed = 0; collected = 0; elapsed = 0;
+    lives = 3; player.blink = 0;
+    exitGate.active = false; exitGate.revealed = false;
+
+    // World generation
+    const margin = Math.max(80, Math.min(W,H)*0.08);
+    const areaW = W - margin*2; const areaH = H - margin*2;
+
+    // Generate walls: clusters of thin AABB bars
+    const wallCount = Math.floor(18 + rng()*8);
+    for (let i=0; i<wallCount; i++) {
+      const orientation = rng() < 0.5 ? 'h' : 'v';
+      const long = rng() < 0.7;
+      const w = orientation==='h' ? Math.floor(rndRange(rng, 160, long? 360 : 260)) : Math.floor(rndRange(rng, 18, 28));
+      const h = orientation==='v' ? Math.floor(rndRange(rng, 160, long? 360 : 260)) : Math.floor(rndRange(rng, 18, 28));
+      const x = Math.floor(rndRange(rng, margin, margin + areaW - w));
+      const y = Math.floor(rndRange(rng, margin, margin + areaH - h));
+      // Avoid central spawn-ish area
+      const cx = W/2, cy = H/2;
+      if (x < cx+120 && x+w > cx-120 && y < cy+120 && y+h > cy-120 && rng()<0.9) { i--; continue; }
+      walls.push({ x, y, w, h });
+    }
+
+    // Player spawn near center, find free spot
+    const spawn = findFreeSpot(W*0.5, H*0.5, margin);
+    player.x = spawn.x; player.y = spawn.y;
+    // Place shards away from player
+    totalShards = Math.floor(8 + rng()*6); // 8-13 shards
+    for (let i=0; i<totalShards; i++) {
+      let tries = 0;
+      while (tries++ < 200) {
+        const sx = rndRange(rng, margin, W - margin);
+        const sy = rndRange(rng, margin, H - margin);
+        if (dist2(sx, sy, player.x, player.y) < 220*220) continue;
+        const r = 7;
+        if (!collidesAnyRect(sx, sy, r, walls)) {
+          shards.push({ x: sx, y: sy, r, t: 0, got: false });
+          break;
+        }
+      }
+    }
+
+    // Exit gate farthest from player
+    let far = { x: W - margin*0.8, y: H - margin*0.8, d: -1 };
+    for (let i=0; i<80; i++) {
+      const gx = rndRange(rng, margin, W - margin);
+      const gy = rndRange(rng, margin, H - margin);
+      const dr = Math.hypot(gx - player.x, gy - player.y);
+      if (dr > far.d && !collidesAnyRect(gx, gy, 18, walls)) {
+        far = { x: gx, y: gy, d: dr };
+      }
+    }
+    exitGate.x = far.x; exitGate.y = far.y;
+
+    // Sentinels: drifting seekers
+    const sentinelCount = Math.floor(2 + rng()*3); // 2-4
+    for (let i=0; i<sentinelCount; i++) {
+      const s = { x: 0, y: 0, r: 14, vx: rndRange(rng, -60, 60), vy: rndRange(rng, -60, 60),
+        targetX: null, targetY: null, aggro: 0, idSeen: new Set(), hue: rndRange(rng, 345, 370) % 360 };
+      const spot = findFreeSpot(W * (0.3 + 0.4*rng()), H * (0.3 + 0.4*rng()), margin);
+      s.x = spot.x; s.y = spot.y;
+      if (Math.hypot(s.x - player.x, s.y - player.y) < 280) { i--; continue; }
+      sentinels.push(s);
+    }
+
+    startTime = performance.now();
+    state = 'playing';
+    updateHUD();
+    hudSeed.textContent = `Seed ${seed}`;
+  }
+
+  function updateHUD() {
+    hudShards.textContent = `Shards ${collected}/${totalShards}`;
+    hudPings.textContent = `Pings ${pingsUsed}`;
+    hudTime.textContent = formatTime(elapsed);
+    hudLives.textContent = '❤'.repeat(lives) + '♡'.repeat(Math.max(0, 3 - lives));
+  }
+
+  function findFreeSpot(prefX, prefY, margin) {
+    let best = { x: clamp(prefX, margin, W-margin), y: clamp(prefY, margin, H-margin), score: -1 };
+    for (let i=0; i<120; i++) {
+      const x = rndRange(rng, margin, W - margin);
+      const y = rndRange(rng, margin, H - margin);
+      if (collidesAnyRect(x, y, 14, walls)) continue;
+      const ds = Math.hypot(x - prefX, y - prefY);
+      const s = ds + rndRange(rng, -30, 30);
+      if (s > best.score) best = { x, y, score: s };
+    }
+    return best;
+  }
+
+  function collidesRectCircle(cx, cy, cr, r) {
+    // r is rect {x,y,w,h}
+    const closestX = clamp(cx, r.x, r.x + r.w);
+    const closestY = clamp(cy, r.y, r.y + r.h);
+    const dx = cx - closestX;
+    const dy = cy - closestY;
+    return (dx*dx + dy*dy) <= cr*cr;
+  }
+  function collidesAnyRect(cx, cy, cr, arr) {
+    for (let i=0; i<arr.length; i++) {
+      if (collidesRectCircle(cx, cy, cr, arr[i])) return true;
+    }
+    return false;
+  }
+
+  // Pings
+  let pingIdSeq = 1;
+  function spawnPing(x, y) {
+    pingsUsed++;
+    const speed = Math.max(W,H) * 0.85; // px/s
+    const thickness = Math.max(20, Math.min(W,H) * 0.04);
+    const id = pingIdSeq++;
+    pings.push({
+      id,
+      x, y,
+      r: 2,
+      speed,
+      maxR: Math.hypot(Math.max(x, W-x), Math.max(y, H-y)) + 20,
+      thick: thickness,
+      alpha: 1,
+      age: 0
+    });
+    // audio
+    beep(420, 0.10, 'sine', 0.35);
+    beep(840, 0.06, 'sine', 0.20);
+  }
+
+  // Game loop
+  let last = performance.now();
+  function loop(t) {
+    const dt = Math.min(0.033, (t - last) / 1000); // clamp delta
+    last = t;
+    if (state === 'playing') elapsed = t - startTime;
+
+    update(dt);
+    draw(dt);
+
+    justPressed.clear();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  function update(dt) {
+    if (state === 'title') return;
+
+    // Input vector
+    let ix = 0, iy = 0;
+    if (keys.ArrowUp || keys.KeyW) iy -= 1;
+    if (keys.ArrowDown || keys.KeyS) iy += 1;
+    if (keys.ArrowLeft || keys.KeyA) ix -= 1;
+    if (keys.ArrowRight || keys.KeyD) ix += 1;
+    const len = Math.hypot(ix, iy);
+    if (len > 0) { ix /= len; iy /= len; }
+    const speed = player.speed * (keys.ShiftLeft ? 1.15 : 1.0);
+    player.vx = ix * speed;
+    player.vy = iy * speed;
+
+    // Ping
+    pingCooldown -= dt;
+    if ((justPressed.has('Space') || (keys.Space && pingCooldown <= 0)) && state === 'playing') {
+      spawnPing(player.x, player.y);
+      pingCooldown = 0.24;
+    }
+
+    // Move player with collision resolution per axis
+    moveCircleWithWalls(player, dt);
+
+    // Update shards
+    for (const s of shards) {
+      s.t += dt;
+      if (!s.got && dist2(player.x, player.y, s.x, s.y) < (player.r + s.r + 2)**2) {
+        s.got = true;
+        collected++;
+        chord([523.25, 659.25, 783.99].map(f=>f*lerp(0.9,1.1, rng())), 0.23, 0.35);
+        if (collected >= totalShards) {
+          exitGate.active = true;
+          exitGate.revealed = true;
+          beep(880, 0.1, 'triangle', 0.4);
+          beep(1320, 0.12, 'sine', 0.25);
+        }
+      }
+    }
+
+    // Update pings (expand and fade)
+    for (let i=pings.length-1; i>=0; i--) {
+      const p = pings[i];
+      p.age += dt;
+      p.r += p.speed * dt;
+      p.alpha = clamp(1 - p.age * 0.55, 0, 1);
+      if (p.r > p.maxR + p.thick) {
+        pings.splice(i,1);
+      }
+    }
+
+    // Sentinels AI
+    for (const s of sentinels) {
+      // Pings interact: when ring passes sentinel, they get aggro target at ping origin
+      for (const p of pings) {
+        if (s.idSeen.has(p.id)) continue;
+        const d = Math.hypot(s.x - p.x, s.y - p.y);
+        if (Math.abs(d - p.r) < p.thick * 0.6) {
+          s.idSeen.add(p.id);
+          s.targetX = p.x; s.targetY = p.y;
+          s.aggro = 2.5 + rndRange(rng, -0.3, 0.5);
+          // subtle audio tick on hearing
+          beep(240, 0.04, 'square', 0.14, (s.x/W)*2-1);
+        }
+      }
+
+      // Movement
+      const maxSpeed = s.aggro > 0 ? 150 : 80;
+      const accel = s.aggro > 0 ? 280 : 120;
+      // Wander jitter
+      if (s.aggro <= 0) {
+        s.vx += rndRange(rng, -30, 30)*dt;
+        s.vy += rndRange(rng, -30, 30)*dt;
+      }
+      // Seek
+      if (s.aggro > 0 && s.targetX != null) {
+        const dx = s.targetX - s.x, dy = s.targetY - s.y;
+        const d = Math.hypot(dx, dy) + 1e-6;
+        s.vx = lerp(s.vx, (dx/d)*maxSpeed, clamp(accel*dt/maxSpeed, 0, 1));
+        s.vy = lerp(s.vy, (dy/d)*maxSpeed, clamp(accel*dt/maxSpeed, 0, 1));
+        s.aggro -= dt;
+      }
+      // Clamp speed
+      const sp = Math.hypot(s.vx, s.vy);
+      if (sp > maxSpeed) { s.vx = s.vx/sp*maxSpeed; s.vy = s.vy/sp*maxSpeed; }
+
+      // Move and collide with walls
+      moveSentinelWithWalls(s, dt);
+
+      // Bounce off world edges
+      if (s.x < s.r) { s.x = s.r; s.vx = Math.abs(s.vx); }
+      if (s.y < s.r) { s.y = s.r; s.vy = Math.abs(s.vy); }
+      if (s.x > W - s.r) { s.x = W - s.r; s.vx = -Math.abs(s.vx); }
+      if (s.y > H - s.r) { s.y = H - s.r; s.vy = -Math.abs(s.vy); }
+
+      // Hit player?
+      const hitR = (player.r + s.r - 1);
+      if (dist2(player.x, player.y, s.x, s.y) < hitR*hitR && player.blink <= 0 && state==='playing') {
+        lives--;
+        player.blink = 1.2;
+        beep(120, 0.15, 'sawtooth', 0.25);
+        if (lives <= 0) {
+          state = 'gameover';
+          setTimeout(()=>overlayTitle.classList.remove('hide'), 10);
+        } else {
+          // Respawn near start region
+          const resp = findFreeSpot(W*0.5, H*0.5, Math.max(80, Math.min(W,H)*0.08));
+          player.x = resp.x; player.y = resp.y;
+        }
+      }
+    }
+
+    // Exit check
+    if (exitGate.active) {
+      if (dist2(player.x, player.y, exitGate.x, exitGate.y) < (exitGate.r + player.r)**2 && state==='playing') {
+        state = 'win';
+        chord([660,990,1320], 0.35, 0.35);
+        setTimeout(()=>overlayTitle.classList.remove('hide'), 10);
+      }
+    }
+
+    if (player.blink > 0) player.blink -= dt;
+
+    updateHUD();
+  }
+
+  function moveCircleWithWalls(c, dt) {
+    let nx = c.x + c.vx * dt;
+    let ny = c.y + c.vy * dt;
+
+    // Resolve X
+    const dx = nx - c.x;
+    if (dx !== 0) {
+      c.x = nx;
+      for (const r of walls) {
+        if (collidesRectCircle(c.x, c.y, c.r, r)) {
+          if (dx > 0) c.x = r.x - c.r - 0.01;
+          else c.x = r.x + r.w + c.r + 0.01;
+          nx = c.x; // update
+        }
+      }
+    }
+    // Resolve Y
+    const dy = ny - c.y;
+    if (dy !== 0) {
+      c.y = ny;
+      for (const r of walls) {
+        if (collidesRectCircle(c.x, c.y, c.r, r)) {
+          if (dy > 0) c.y = r.y - c.r - 0.01;
+          else c.y = r.y + r.h + c.r + 0.01;
+          ny = c.y; // update
+        }
+      }
+    }
+
+    // Keep in bounds
+    c.x = clamp(c.x, c.r, W - c.r);
+    c.y = clamp(c.y, c.r, H - c.r);
+  }
+
+  function moveSentinelWithWalls(s, dt) {
+    // Separate axis movement like player
+    let nx = s.x + s.vx*dt;
+    let ny = s.y + s.vy*dt;
+
+    // X
+    const dx = nx - s.x;
+    if (dx !== 0) {
+      s.x = nx;
+      for (const r of walls) {
+        if (collidesRectCircle(s.x, s.y, s.r, r)) {
+          if (dx > 0) { s.x = r.x - s.r - 0.01; s.vx = -Math.abs(s.vx)*0.85; }
+          else { s.x = r.x + r.w + s.r + 0.01; s.vx = Math.abs(s.vx)*0.85; }
+          nx = s.x;
+        }
+      }
+    }
+    // Y
+    const dy = ny - s.y;
+    if (dy !== 0) {
+      s.y = ny;
+      for (const r of walls) {
+        if (collidesRectCircle(s.x, s.y, s.r, r)) {
+          if (dy > 0) { s.y = r.y - s.r - 0.01; s.vy = -Math.abs(s.vy)*0.85; }
+          else { s.y = r.y + r.h + s.r + 0.01; s.vy = Math.abs(s.vy)*0.85; }
+          ny = s.y;
+        }
+      }
+    }
+  }
+
+  // Visual helpers
+  function brightnessFromLamp(px, py, radius) {
+    const d = Math.hypot(px - player.x, py - player.y);
+    return clamp(1 - d / radius, 0, 1);
+  }
+  function brightnessFromPings(px, py) {
+    let b = 0;
+    for (const p of pings) {
+      const d = Math.hypot(px - p.x, py - p.y);
+      const ringDist = Math.abs(d - p.r);
+      const f = clamp(1 - ringDist / p.thick, 0, 1) * p.alpha;
+      b = Math.max(b, f);
+    }
+    return b;
+  }
+  function brightnessForRect(r) {
+    // Approximate: sample at rect center and 4 corners
+    const pts = [
+      [r.x + r.w*0.5, r.y + r.h*0.5],
+      [r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]
+    ];
+    let b = 0;
+    for (const [x,y] of pts) {
+      const lamp = brightnessFromLamp(x, y, Math.max(90, Math.min(W,H)*0.10));
+      const ring = brightnessFromPings(x, y);
+      b = Math.max(b, clamp(lamp*0.9 + ring*1.2, 0, 1));
+    }
+    return b;
+  }
+  function brightnessAt(x, y) {
+    const lamp = brightnessFromLamp(x, y, Math.max(90, Math.min(W,H)*0.10));
+    const ring = brightnessFromPings(x, y);
+    return clamp(lamp*0.9 + ring*1.25, 0, 1);
+  }
+
+  function drawGrid() {
+    const gap = 40;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x=0; x<W; x+=gap) { ctx.moveTo(x,0); ctx.lineTo(x,H); }
+    for (let y=0; y<H; y+=gap) { ctx.moveTo(0,y); ctx.lineTo(W,y); }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function draw(dt) {
+    // Background
+    ctx.fillStyle = '#07121b';
+    ctx.fillRect(0,0,W,H);
+    drawGrid();
+
+    // Glow layer blending
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Draw ping rings
+    for (const p of pings) {
+      const alpha = 0.14 * p.alpha;
+      ctx.lineWidth = p.thick;
+      const grad = ctx.createRadialGradient(p.x, p.y, Math.max(1, p.r - p.thick*0.5), p.x, p.y, p.r + p.thick*0.5);
+      grad.addColorStop(0.45, 'rgba(0,0,0,0)');
+      grad.addColorStop(0.49, `rgba(85, 255, 240, ${alpha*0.2})`);
+      grad.addColorStop(0.5,  `rgba(120, 255, 246, ${alpha})`);
+      grad.addColorStop(0.51, `rgba(130, 220, 255, ${alpha*0.5})`);
+      grad.addColorStop(0.60, 'rgba(0,0,0,0)');
+      ctx.strokeStyle = grad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+      ctx.stroke();
+    }
+
+    // Draw walls with brightness edges
+    for (const r of walls) {
+      const b = brightnessForRect(r);
+      if (b <= 0.01) continue;
+      const c = Math.floor(lerp(25, 200, b));
+      ctx.strokeStyle = `rgba(${c}, ${Math.floor(lerp(60,255,b))}, ${Math.floor(lerp(110,255,b))}, ${lerp(0.12, 0.75, b)})`;
+      ctx.lineWidth = lerp(1, 3.2, b);
+      ctx.strokeRect(r.x+0.5, r.y+0.5, r.w-1, r.h-1);
+      // fill faint
+      ctx.fillStyle = `rgba(34, 164, 216, ${lerp(0.0, 0.06, b)})`;
+      ctx.fillRect(r.x+1, r.y+1, r.w-2, r.h-2);
+    }
+
+    // Draw shards
+    for (const s of shards) {
+      if (s.got) continue;
+      const b = brightnessAt(s.x, s.y);
+      if (b <= 0.02) continue;
+      const pulse = 1 + Math.sin(s.t*5 + s.x*0.01)*0.15;
+      const rr = s.r * pulse;
+      // glow
+      ctx.fillStyle = `rgba(255, 223, 127, ${lerp(0.0, 0.55, b)})`;
+      for (let i=5; i>=1; i--) {
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, rr + i*3, 0, Math.PI*2);
+        ctx.globalAlpha = lerp(0.0, 0.03, b) * (i/5);
+        ctx.fill();
+      }
+      // core
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = `rgba(255, 209, 102, ${lerp(0.0, 1.0, b)})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, rr, 0, Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle = `rgba(255, 255, 255, ${lerp(0.0, 0.8, b)})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, rr+1, 0, Math.PI*2);
+      ctx.stroke();
+    }
+
+    // Draw exit gate
+    if (exitGate.active || exitGate.revealed) {
+      const b = brightnessAt(exitGate.x, exitGate.y) * (exitGate.active ? 1 : 0.6);
+      if (b > 0.02) {
+        const r = exitGate.r;
+        for (let i=0; i<4; i++) {
+          ctx.beginPath();
+          ctx.globalAlpha = lerp(0.0, 0.05, b) * (1 - i*0.18);
+          ctx.fillStyle = `rgba(160, 140, 255, 1)`;
+          ctx.arc(exitGate.x, exitGate.y, r + i*8 + Math.sin((last/1000 + i)*2)*2, 0, Math.PI*2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = `rgba(168, 150, 255, ${lerp(0.0, 0.85, b)})`;
+        ctx.setLineDash([6, 8]);
+        ctx.beginPath();
+        ctx.arc(exitGate.x, exitGate.y, r, 0, Math.PI*2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    // Draw sentinels
+    for (const s of sentinels) {
+      const b = brightnessAt(s.x, s.y) * (s.aggro > 0 ? 1.2 : 1.0);
+      if (b <= 0.02) continue;
+      const hue = s.hue|0;
+      const core = `hsla(${hue}, 95%, ${lerp(45, 75, b)}%, ${lerp(0.6, 1.0, b)})`;
+      const ring = `hsla(${(hue+15)%360}, 100%, ${lerp(60, 80, b)}%, ${lerp(0.2, 0.7, b)})`;
+
+      // Glow
+      ctx.fillStyle = ring;
+      for (let i=6; i>=1; i--) {
+        ctx.beginPath();
+        ctx.globalAlpha = lerp(0.0, 0.045, b) * (i/6);
+        ctx.arc(s.x, s.y, s.r + i*4, 0, Math.PI*2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      // Body
+      ctx.fillStyle = core;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      ctx.fill();
+      // Eye direction indicator
+      const dirx = s.vx, diry = s.vy;
+      const d = Math.hypot(dirx, diry) + 1e-6;
+      const ex = s.x + (dirx/d) * (s.r - 3);
+      const ey = s.y + (diry/d) * (s.r - 3);
+      ctx.strokeStyle = `rgba(255,255,255, ${lerp(0.15, 0.85, b)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+    }
+
+    // Draw player and lamp
+    const lampR = Math.max(90, Math.min(W,H)*0.10);
+    const lampGrad = ctx.createRadialGradient(player.x, player.y, player.r, player.x, player.y, lampR);
+    lampGrad.addColorStop(0, 'rgba(60, 255, 240, 0.25)');
+    lampGrad.addColorStop(1, 'rgba(60, 255, 240, 0.0)');
+    ctx.fillStyle = lampGrad;
+    ctx.beginPath(); ctx.arc(player.x, player.y, lampR, 0, Math.PI*2); ctx.fill();
+
+    // Player core
+    const invuln = player.blink > 0 ? (Math.floor(player.blink*16)%2===0) : false;
+    ctx.globalAlpha = invuln ? 0.35 : 1;
+    ctx.fillStyle = '#9ff1ff';
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI*2); ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#c5fbff';
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    ctx.restore();
+
+    // Vignette
+    ctx.save();
+    const vign = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.5, W/2, H/2, Math.min(W,H)*0.9);
+    vign.addColorStop(0, 'rgba(0,0,0,0)');
+    vign.addColorStop(1, 'rgba(0,0,0,0.35)');
+    ctx.fillStyle = vign;
+    ctx.fillRect(0,0,W,H);
+    ctx.restore();
+
+    // UI states overlays (win / gameover)
+    if (state === 'win' || state === 'gameover') {
+      const title = state === 'win' ? 'Gate Reached!' : 'Caught by a Seeker';
+      const sub = state === 'win' ?
+        'Your echoes found every shard. The gate sang you home.' :
+        'The silence broke — and the Seekers broke you.';
+      drawBanner(title, sub);
+    } else if (state === 'title') {
+      // Title handled by DOM overlay
+    }
+  }
+
+  function drawBanner(title, sub) {
+    const pad = 20;
+    const boxW = Math.min(W - 80, 740);
+    const boxH = 140;
+    const x = (W - boxW) * 0.5;
+    const y = (H - boxH) * 0.15;
+
+    // Panel
+    ctx.save();
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = 'rgba(9,22,35,0.85)';
+    ctx.strokeStyle = 'rgba(21,64,98,0.9)';
+    ctx.lineWidth = 2;
+    roundRect(ctx, x, y, boxW, boxH, 12, true, true);
+    ctx.restore();
+
+    // Text
+    ctx.save();
+    ctx.fillStyle = '#ffdf7f';
+    ctx.font = `700 ${Math.max(20, Math.min(42, W*0.03))}px Inter, system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(title, W/2, y + 48);
+    ctx.fillStyle = '#d1f7ff';
+    ctx.font = `400 ${Math.max(12, Math.min(20, W*0.015))}px Inter, system-ui, sans-serif`;
+    ctx.fillText(sub, W/2, y + 78);
+    ctx.fillStyle = '#bfefff';
+    ctx.font = `400 ${Math.max(10, Math.min(18, W*0.013))}px Inter, system-ui, sans-serif`;
+
+    const scoreStr = `Time ${formatTime(elapsed)}  •  Pings ${pingsUsed}  •  Seed ${seed}`;
+    ctx.fillText(scoreStr, W/2, y + 108);
+
+    ctx.fillStyle = '#a0f0ff';
+    ctx.fillText('Press Enter to play again — R to reroll map — M to mute', W/2, y + 128);
+    ctx.restore();
+  }
+
+  function roundRect(ctx, x, y, w, h, r, fill, stroke) {
+    if (w < 2*r) r = w/2; if (h < 2*r) r = h/2;
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y, x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x, y+h, r);
+    ctx.arcTo(x, y+h, x, y, r);
+    ctx.arcTo(x, y, x+w, y, r);
+    ctx.closePath();
+    if (fill) ctx.fill();
+    if (stroke) ctx.stroke();
+  }
+
+  // Restart game from overlays
+  window.addEventListener('keydown', (e) => {
+    if (state === 'win' || state === 'gameover') {
+      if (e.code === 'Enter' || e.code === 'NumpadEnter') {
+        overlayTitle.classList.add('hide');
+        resetGame();
+      }
+      if (e.code === 'KeyR') {
+        overlayTitle.classList.add('hide');
+        reroll();
+      }
+    }
+  });
+
+  // Initial HUD seed display
+  hudSeed.textContent = `Seed ${seed}`;
+
+})();
+</script>
+</body>
+</html>
